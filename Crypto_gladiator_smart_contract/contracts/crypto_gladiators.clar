@@ -57,11 +57,28 @@
 (define-read-only (get-owner-count (user principal))
     (default-to u0 (map-get? user-character-count user))
 )
+
 ;; Helper function to get owner of a character
 (define-read-only (get-owner (character-id uint))
     (match (get-character character-id)
         character (ok (get owner character))
         ERR_NOT_FOUND
+    )
+)
+
+;; Input validation functions
+(define-private (is-valid-character-id (character-id uint))
+    (<= character-id (var-get last-character-id))
+)
+
+(define-private (is-valid-price (price uint))
+    (>= price MIN_PRICE)
+)
+
+(define-private (is-valid-name (name (string-ascii 24)))
+    (and 
+        (> (len name) u0)
+        (<= (len name) u24)
     )
 )
 
@@ -84,6 +101,7 @@
             (current-count (get-owner-count caller))
         )
         ;; Input validation
+        (asserts! (is-valid-name name) ERR_INVALID_INPUT)
         (asserts! (< current-count MAX_CHARACTERS_PER_USER) ERR_INVALID_INPUT)
         
         (try! (stx-transfer? MINT_PRICE caller CONTRACT_OWNER))
@@ -105,10 +123,12 @@
         (ok new-id)
     )
 )
+
 (define-public (list-for-sale (character-id uint) (price uint))
     (begin
         ;; Input validation
-        (asserts! (>= price MIN_PRICE) ERR_INVALID_INPUT)
+        (asserts! (is-valid-character-id character-id) ERR_INVALID_INPUT)
+        (asserts! (is-valid-price price) ERR_INVALID_INPUT)
         
         (let 
             (
@@ -126,6 +146,9 @@
 
 (define-public (buy-character (character-id uint))
     (begin
+        ;; Input validation
+        (asserts! (is-valid-character-id character-id) ERR_INVALID_INPUT)
+        
         (let
             (
                 (listing (unwrap! (get-listing character-id) ERR_NOT_FOUND))
@@ -153,5 +176,71 @@
                 (ok true)
             )
         )
+    )
+)
+
+(define-public (battle (attacker-id uint) (defender-id uint))
+    (begin
+        ;; Input validation
+        (asserts! (is-valid-character-id attacker-id) ERR_INVALID_INPUT)
+        (asserts! (is-valid-character-id defender-id) ERR_INVALID_INPUT)
+        (asserts! (not (is-eq attacker-id defender-id)) ERR_INVALID_INPUT)
+        
+        (let
+            (
+                (attacker (unwrap! (get-character attacker-id) ERR_NOT_FOUND))
+                (defender (unwrap! (get-character defender-id) ERR_NOT_FOUND))
+                (current-block block-height)
+                (owner (try! (get-owner attacker-id)))
+            )
+            ;; Verify ownership and cooldown
+            (asserts! (is-eq owner tx-sender) ERR_UNAUTHORIZED)
+            (asserts! (> current-block (+ (get last-battle-block attacker) u10)) ERR_COOLDOWN)
+            
+            (let
+                (
+                    (attack-power (+ (get attack attacker) (get level attacker)))
+                    (defense-power (+ (get defense defender) (get level defender)))
+                    (attacker-wins (> attack-power defense-power))
+                )
+                ;; Award XP and potentially level up
+                (if attacker-wins
+                    (try! (add-xp attacker-id u50))
+                    (try! (add-xp defender-id u25))
+                )
+                
+                ;; Update last battle time
+                (map-set characters attacker-id 
+                    (merge attacker { last-battle-block: current-block }))
+                
+                (ok attacker-wins)
+            )
+        )
+    )
+)
+
+(define-private (add-xp (character-id uint) (xp-amount uint))
+    (let
+        (
+            (character (unwrap! (get-character character-id) ERR_NOT_FOUND))
+            (current-xp (get xp character))
+            (current-level (get level character))
+            (new-xp (+ current-xp xp-amount))
+            (xp-required (* BASE_XP_REQUIRED current-level))
+        )
+        (if (and (>= new-xp xp-required) (< current-level MAX_LEVEL))
+            (map-set characters character-id
+                (merge character {
+                    level: (+ current-level u1),
+                    xp: u0,
+                    attack: (+ (get attack character) u1),
+                    defense: (+ (get defense character) u1)
+                }))
+            (map-set characters character-id
+                (merge character {
+                    xp: new-xp
+                }))
+        )
+        (ok true)
     )
 )
