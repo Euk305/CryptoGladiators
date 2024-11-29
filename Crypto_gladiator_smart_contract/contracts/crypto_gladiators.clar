@@ -1,71 +1,59 @@
-;; Input validation functions
-(define-private (is-valid-character-id (character-id uint))
-    (<= character-id (var-get last-character-id))
+;; CryptoGladiators
+;; A blockchain-based character collection and battle system
+;; Where players can mint, trade, and battle with unique characters
+
+;; Error codes
+(define-constant ERR_NOT_FOUND (err u404))
+(define-constant ERR_UNAUTHORIZED (err u401))
+(define-constant ERR_TRANSFER_FAILED (err u402))
+(define-constant ERR_COOLDOWN (err u403))
+(define-constant ERR_INVALID_INPUT (err u400))
+
+;; Define constants for game parameters
+(define-constant CONTRACT_OWNER tx-sender)
+(define-constant MINT_PRICE u100000) ;; in microSTX
+(define-constant MAX_LEVEL u100)
+(define-constant BASE_XP_REQUIRED u100)
+(define-constant MIN_PRICE u1000) ;; Minimum listing price
+(define-constant MAX_CHARACTERS_PER_USER u100) ;; Maximum characters per user
+
+;; Define custom types for our characters
+(define-data-var last-character-id uint u0)
+
+(define-map characters
+    uint
+    {
+        owner: principal,
+        name: (string-ascii 24),
+        level: uint,
+        xp: uint,
+        attack: uint,
+        defense: uint,
+        last-battle-block: uint
+    }
 )
 
-(define-private (is-valid-price (price uint))
-    (>= price MIN_PRICE)
+;; Keep track of ownership counts
+(define-map user-character-count principal uint)
+
+;; Market listings
+(define-map market
+    uint  ;; character ID
+    {
+        price: uint,
+        seller: principal
+    }
 )
 
-(define-private (is-valid-name (name (string-ascii 24)))
-    (and 
-        (> (len name) u0)
-        (<= (len name) u24)
-    )
+;; Read-only functions
+(define-read-only (get-character (character-id uint))
+    (map-get? characters character-id)
 )
 
-;; Update public functions with validation
-
-;; Update mint-character
-(define-public (mint-character (name (string-ascii 24)))
-    (let
-        (
-            (new-id (+ (var-get last-character-id) u1))
-            (caller tx-sender)
-            (current-count (get-owner-count caller))
-        )
-        ;; Input validation
-        (asserts! (is-valid-name name) ERR_INVALID_INPUT)
-        (asserts! (< current-count MAX_CHARACTERS_PER_USER) ERR_INVALID_INPUT)
-        
-        (try! (stx-transfer? MINT_PRICE caller CONTRACT_OWNER))
-        ;; Rest of the function remains the same
-        ...
-    )
+(define-read-only (get-listing (character-id uint))
+    (map-get? market character-id)
 )
 
-;; Update list-for-sale
-(define-public (list-for-sale (character-id uint) (price uint))
-    (begin
-        ;; Input validation
-        (asserts! (is-valid-character-id character-id) ERR_INVALID_INPUT)
-        (asserts! (is-valid-price price) ERR_INVALID_INPUT)
-        
-        ;; Rest of the function remains the same
-        ...
-    )
-)
-
-;; Update buy-character
-(define-public (buy-character (character-id uint))
-    (begin
-        ;; Input validation
-        (asserts! (is-valid-character-id character-id) ERR_INVALID_INPUT)
-        
-        ;; Rest of the function remains the same
-        ...
-    )
-)
-
-;; Update battle
-(define-public (battle (attacker-id uint) (defender-id uint))
-    (begin
-        ;; Input validation
-        (asserts! (is-valid-character-id attacker-id) ERR_INVALID_INPUT)
-        (asserts! (is-valid-character-id defender-id) ERR_INVALID_INPUT)
-        (asserts! (not (is-eq attacker-id defender-id)) ERR_INVALID_INPUT)
-        
-        ;; Rest of the function remains the same
-        ...
-    )
+(define-read-only (get-owner-count (user principal))
+    (default-to u0 (map-get? user-character-count user))
 )
