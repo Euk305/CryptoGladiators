@@ -75,3 +75,60 @@
          (ok new-id)
     )
 )
+(define-private (is-valid-character-id (character-id uint))
+    (<= character-id (var-get last-character-id))
+)
+
+(define-private (is-valid-price (price uint))
+    (>= price MIN_PRICE)
+)
+
+(define-read-only (get-character (character-id uint))
+    (map-get? characters character-id)
+)
+
+(define-read-only (get-listing (character-id uint))
+    (map-get? market character-id)
+)
+
+(define-read-only (get-owner (character-id uint))
+    (match (get-character character-id)
+        character (ok (get owner character))
+        ERR_NOT_FOUND
+    )
+)
+
+(define-public (list-for-sale (character-id uint) (price uint))
+    (begin
+         (asserts! (is-valid-character-id character-id) ERR_INVALID_INPUT)
+         (asserts! (is-valid-price price) ERR_INVALID_INPUT)
+         (let ((owner (try! (get-owner character-id))))
+              (asserts! (is-eq tx-sender owner) ERR_UNAUTHORIZED)
+              (map-set market character-id { price: price, seller: tx-sender })
+              (ok true)
+         )
+    )
+)
+
+(define-public (buy-character (character-id uint))
+    (begin
+         (asserts! (is-valid-character-id character-id) ERR_INVALID_INPUT)
+         (let (
+              (listing (unwrap! (get-listing character-id) ERR_NOT_FOUND))
+              (price (get price listing))
+              (seller (get seller listing))
+              (buyer-count (get-owner-count tx-sender))
+         )
+         (asserts! (< buyer-count MAX_CHARACTERS_PER_USER) ERR_INVALID_INPUT)
+         (try! (stx-transfer? price tx-sender seller))
+         (map-delete market character-id)
+         (let ((character (unwrap! (get-character character-id) ERR_NOT_FOUND)))
+              (map-set characters character-id (merge character { owner: tx-sender }))
+              (map-set user-character-count seller (- (get-owner-count seller) u1))
+              (map-set user-character-count tx-sender (+ buyer-count u1))
+              (ok true)
+         )
+         )
+    )
+)
+
